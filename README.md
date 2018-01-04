@@ -1,5 +1,10 @@
 # JS/PHP Active911 Map
 
+## What is it?
+~~A burning trash heap~~
+It's a map that plots alerts from an active911 alert feed, with an implemented radar.
+Coded in JS and PHP.
+
 ## What you need to do
 In rssfeed.php you'll have to set the variable rssFeedURL to your department's rss feed URL. You can find your rss URL under the agency tab on the active911 site.
 
@@ -24,6 +29,6 @@ I thought about implementing a slide show. Just so the TVs aren't displaying the
 
 
 ## It doesn't work
-¯\_(ツ)_/¯
+¯\[_(ツ)_/¯
 
 If nothing else, use it for insperation.
