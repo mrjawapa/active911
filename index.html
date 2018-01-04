@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html>
+  <head>
+
+    <!--
+    JS/PHP Active 911 Alert Map
+
+    Brandon Stevens
+    hello@mrjawapa.com
+
+    version I don't even know, does it matter?
+    -->
+
+    <title>Active 911</title>
+    <meta charset="UTF-8">
+    <style>
+      html {
+        height: 100%;
+        width: 100%;
+      }
+
+      body {
+        height: 100%;
+        width: 100%;
+        margin: 0;
+        padding: 0;
+        font-size:30px;
+      }
+
+      #map {
+        height: 100%;
+        width: 100%;
+      }
+    </style>
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.1.1/jquery.min.js"></script>
+  </head>
+
+  <body>
+    <div id="map"></div>
+
+    <script>
+      // General variables
+      rssUrl = "http://localhost/rssfeed.php"; // Where the RSS feed is located
+                                               // I had to retrieve the rss feed with PHP first, because of some cross-domain origin issues.
+
+      // RSS variables
+      invidentName = null; // Incident title (fire, wreck, etc.)
+      incidentAddress = null; // Incident address
+      incidentCoordinates = null; // GPS coordinates of address
+      previousIncidentTime = null; // The time the last incident was called out (used for detecting new incidents)
+      currentIncidentTime = null; // The time the current incident was called out (used for detecting new incidents)
+      currentTime = (new Date).getTime(); // Current epoch time
+      activeAlert = false; // If there is an active (new) alert
+      loopDelay = 10000; // How long to wait (in milliseconds) before checking RSS feed again
+
+      // Map variables
+      defaultPosition = {lat: 35.62234, lng: -79.12619}; // Default position on the map
+      hydrantsArray = []; // Array of all hydrant markers
+      landingsArray = []; // Array of all heli-landing markers
+      markersArray = []; // Array of all other markers - this one is mostly used for incident marking
+
+      // Create the map
+      function initialize() {
+        map = new google.maps.Map(document.getElementById("map"), {
+          zoom: 14,
+          center: new google.maps.LatLng(defaultPosition),
+          disableDefaultUI: true,
+          styles: [
+    {
+        "featureType": "administrative",
+        "elementType": "labels.text.fill",
+        "stylers": [
+            {
+                "color": "#444444"
+            }
+        ]
+    },
+    {
+        "featureType": "administrative.land_parcel",
+        "elementType": "all",
+        "stylers": [
+            {
+                "visibility": "off"
+            }
+        ]
+    },
+    {
+        "featureType": "landscape",
+        "elementType": "all",
+        "stylers": [
+            {
+                "color": "#d8d8d8"
+            }
+        ]
+    },
+    {
+        "featureType": "poi",
+        "elementType": "all",
+        "stylers": [
+            {
+                "visibility": "simplified"
+            }
+        ]
+    },
+    {
+        "featureType": "road",
+        "elementType": "labels",
+        "stylers": [
+            {
+                "gamma": "0.00"
+            },
+            {
+                "weight": "0.01"
+            }
+        ]
+    },
+    {
+        "featureType": "road",
+        "elementType": "labels.text",
+        "stylers": [
+            {
+                "color": "#000000"
+            },
+            {
+                "weight": "1.08"
+            }
+        ]
+    },
+    {
+        "featureType": "road",
+        "elementType": "labels.icon",
+        "stylers": [
+            {
+                "weight": "1.10"
+            }
+        ]
+    },
+    {
+        "featureType": "road.arterial",
+        "elementType": "labels.icon",
+        "stylers": [
+            {
+                "visibility": "off"
+            }
+        ]
+    },
+    {
+        "featureType": "transit",
+        "elementType": "all",
+        "stylers": [
+            {
+                "visibility": "off"
+            }
+        ]
+    },
+    {
+        "featureType": "water",
+        "elementType": "geometry",
+        "stylers": [
+            {
+                "color": "#2cafe4"
+            },
+            {
+                "weight": "1.30"
+            }
+        ]
+    },
+    {
+        "featureType": "water",
+        "elementType": "labels.text",
+        "stylers": [
+            {
+                "color": "#000000"
+            },
+            {
+                "weight": "1.08"
+            }
+        ]
+    }
+]
+        });
+
+        // Create hydrant/landing zone markers
+        $.getJSON("marker-locations.json", function(markers) { // I pull them from an external file because it keeps things a little cleaner
+          $.each(markers, function(key, data) {
+            var latLng = new google.maps.LatLng(data.lat, data.lng);
+            if (data.title == "hydrant") {
+              var marker = new google.maps.Marker({
+                  position: latLng,
+                  icon: "hydrant-logo.png", // Map icon for hydrants
+                  map: map
+              });
+              hydrantsArray.push(marker);
+            }
+            else if (data.title == "landing") {
+              var marker = new google.maps.Marker({
+                  position: latLng,
+                  icon: "landing-logo.png", // Map icon for landing zones
+                  map: map
+              });
+              landingsArray.push(marker);
+            }
+            marker.setMap(map);
+          });
+        });
+
+        // Hide the hydrant/landing markers when zoomed out - otherwise they cover the map
+        map.addListener('zoom_changed', function() {
+          if (map.getZoom() >=16) {
+            $.getJSON("marker-locations.json", function(markers) {
+              $.each(markers, function(key, data) {
+                var latLng = new google.maps.LatLng(data.lat, data.lng);
+                if (data.title == "hydrant") {
+                  var marker = new google.maps.Marker({
+                      position: latLng,
+                      icon: "hydrant-logo.png",
+                      map: map
+                  });
+                  hydrantsArray.push(marker);
+                }
+                else if (data.title == "landing") {
+                  var marker = new google.maps.Marker({
+                      position: latLng,
+                      icon: "landing-logo.png",
+                      map: map
+                  });
+                  landingsArray.push(marker);
+                }
+                marker.setMap(map);
+              });
+            });
+          }
+          else {
+            for (var i = 0; i < hydrantsArray.length; i++ ) {
+              hydrantsArray[i].setMap(null);
+            }
+            hydrantsArray.length = 0;
+            for (var i = 0; i < landingsArray.length; i++ ) {
+              landingsArray[i].setMap(null);
+            }
+            landingsArray.length = 0;
+          }
+        });
+      }
+
+      // Checking the RSS feed for new alerts
+      function checkFeed() {
+        setTimeout(function(){
+          // Get the RSS feed
+          var x = new XMLHttpRequest();
+          x.open("GET", "rssfeed.php", true);
+          x.onreadystatechange = function() {
+            if (x.readyState === 4 && x.status === 200) {
+              // Parse the RSS feed
+              var doc = x.responseXML;
+              var incidentName = doc.getElementsByTagName("channel")[0].getElementsByTagName("item")[0].getElementsByTagName("title")[0].textContent;
+              var incidentAddress = doc.getElementsByTagName("channel")[0].getElementsByTagName("item")[0].getElementsByTagName("description")[0].textContent.concat(", Ohio");
+              var pubdate = doc.getElementsByTagName("channel")[0].getElementsByTagName("item")[0].getElementsByTagName("pubDate")[0].textContent;
+              var currentIncidentTime = (new Date(pubdate)).getTime();
+
+              // If there's a new alert (new RSS entry)
+              if (currentIncidentTime != previousIncidentTime && (Math.abs(new Date() - currentIncidentTime)) < 2700000) {
+                console.log("New alert!");
+                activeAlert = true;
+                previousIncidentTime = currentIncidentTime;
+
+                // Turn the incident address into GPS coordinates
+                var geocoder = new google.maps.Geocoder();
+                geocoder.geocode({
+                  "address": incidentAddress
+                }, function(results, status) {
+                  if (status == google.maps.GeocoderStatus.OK) {
+                    // Change the map position/zoom to show the incident position
+                    map.setZoom(17);
+                    map.setCenter(results[0].geometry.location);
+                    incidentCoordinates = results[0].geometry.location;
+
+                    // Hide the radar images while there's an active alert
+                    tileNEX = new google.maps.ImageMapType({
+                      getTileUrl: function(tile, zoom) {
+                        return "https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/nexrad-n0q-900913/" + zoom + "/" + tile.x + "/" + tile.y + ".png?" + (new Date()).getTime();
+                      },
+                      opacity: 0,
+                      isPng: true
+                    });
+                    map.overlayMapTypes.setAt("1", tileNEX);
+
+                    // Create a map marker on the incident position
+                    var marker = new google.maps.Marker({
+                      position: incidentCoordinates,
+                      animation: google.maps.Animation.BOUNCE,
+                      map: map
+                    });
+                    markersArray.push(marker);
+
+                    // Create an info window above the map marker
+                    var infowindow = new google.maps.InfoWindow({
+                      content: '<b>' + incidentName + '<br>' + incidentAddress + '</b>'
+                    });
+                    infowindow.open(map, marker);
+                  } else {
+                    alert("Request failed.")
+                  }
+                });
+              }
+
+              // If there's an active alert and it is 45+ minutes old
+              else if (activeAlert == true && Math.abs((new Date() - currentIncidentTime)) > 2700000) {
+                console.log("removed alert");
+                activeAlert = false;
+
+                // Reset the map view
+                map.setZoom(14);
+                map.setCenter(defaultPosition);
+
+                // Remove the map marker
+                for (var i = 0; i < markersArray.length; i++ ) {
+                  markersArray[i].setMap(null);
+                }
+                markersArray.length = 0;
+
+                // Bring the radar back into view
+                tileNEX = new google.maps.ImageMapType({
+                  getTileUrl: function(tile, zoom) {
+                    return "https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/nexrad-n0q-900913/" + zoom + "/" + tile.x + "/" + tile.y + ".png?" + (new Date()).getTime();
+                  },
+                  opacity: 0.60,
+                  isPng: true
+                });
+                map.overlayMapTypes.setAt("1", tileNEX);
+              }
+
+              // If nothing else then update the radar image
+              else {
+                tileNEX = new google.maps.ImageMapType({
+                  getTileUrl: function(tile, zoom) {
+                    return "https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/nexrad-n0q-900913/" + zoom + "/" + tile.x + "/" + tile.y + ".png?" + (new Date()).getTime();
+                  },
+                  opacity: 0.60,
+                  isPng: true
+                });
+                map.overlayMapTypes.setAt("1", tileNEX);
+                console.log("updated radar");
+              }
+            }
+          }
+          x.send(null);
+          checkFeed();
+        }, loopDelay)
+      }
+      checkFeed();
+    </script>
+    <script async defer src="https://maps.googleapis.com/maps/api/js?key=YOU NEED AN API KEY FROM GOOGLE&callback=initialize"></script>
+  </body>
+</html>
